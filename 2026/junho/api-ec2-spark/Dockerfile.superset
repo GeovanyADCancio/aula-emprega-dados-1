@@ -1,0 +1,9 @@
+FROM apache/superset:3.1.0
+
+USER root
+
+# Driver SQLAlchemy para conectar o Superset no Dremio via Arrow Flight SQL
+RUN pip install --no-cache-dir \
+    sqlalchemy-dremio==3.0.2
+
+USER superset
