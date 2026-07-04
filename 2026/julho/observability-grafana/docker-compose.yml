@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: obs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: obs_user
+      POSTGRES_PASSWORD: obs_pass
+      POSTGRES_DB: observability
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Roda automaticamente no primeiro start do container
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obs_user -d observability"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: obs-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Permite adicionar o datasource manualmente durante a aula sem travar em permissões
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  grafana_data:
