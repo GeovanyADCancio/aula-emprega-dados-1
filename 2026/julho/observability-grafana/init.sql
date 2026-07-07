@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS node_metrics (
     "timestamp"             TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     -- Identificação do "cluster" e do nó simulado
-    cluster_name            VARCHAR(50)  NOT NULL,
+    cluster_name            VARCHAR(50)  NOT NULL, -- dev, prd, homologação
     node_name               VARCHAR(100) NOT NULL,
     node_role               VARCHAR(50)  NOT NULL,   -- ex: airflow-worker, spark-executor, kafka-broker
 
