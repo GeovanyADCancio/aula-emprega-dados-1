@@ -125,7 +125,7 @@ def advance_incident(node: NodeProfile) -> None:
         node.incident_severity = "healthy"
 
 
-def generate_reading(node: NodeProfile) -> dict:
+def generate_reading(node: NodeProfile, now: datetime) -> dict:
     """Gera uma leitura de métricas para um nó, considerando hora do dia e incidentes."""
     multiplier = business_hours_multiplier()
 
@@ -164,7 +164,7 @@ def generate_reading(node: NodeProfile) -> dict:
     disk = min(100, max(0, disk))
 
     return {
-        "timestamp": datetime.now(timezone.utc),
+        "timestamp": now,
         "cluster_name": CLUSTER_NAME,
         "node_name": node.name,
         "node_role": node.role,
@@ -214,17 +214,18 @@ def main() -> None:
     try:
         with conn.cursor() as cur:
             while True:
+                now = datetime.now(timezone.utc)
                 cycle_readings = []
                 for node in NODES:
                     maybe_trigger_incident(node)
-                    reading = generate_reading(node)
+                    reading = generate_reading(node, now)
                     cycle_readings.append(reading)
                     cur.execute(INSERT_SQL, reading)
                     advance_incident(node)
 
                 # Log simples no console pra quem estiver acompanhando ao vivo na aula
                 alerts = [r for r in cycle_readings if r["status"] != "healthy"]
-                ts = cycle_readings[0]["timestamp"].strftime("%H:%M:%S")
+                ts = now.strftime("%H:%M:%S")
                 if alerts:
                     resumo = ", ".join(f"{a['node_name']}={a['status']}" for a in alerts)
                     print(f"[{ts}] {len(cycle_readings)} leituras inseridas | ALERTAS: {resumo}")

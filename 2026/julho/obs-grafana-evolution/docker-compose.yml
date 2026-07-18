@@ -1,0 +1,164 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stack completo e autocontido desta aula: Airflow (gerando execuções reais)
+# + Alloy (coleta os logs dos arquivos gerados pelo Airflow) + Loki (armazena
+# e indexa os logs) + Grafana (novo, só pra esta aula — não depende do
+# compose da aula 1, que serviu só de referência).
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # Formato de log padrão do Airflow — é essa string que o Alloy vai parsear.
+    # Mantendo explícito aqui pra não depender do default da imagem mudar.
+    AIRFLOW__LOGGING__LOG_FORMAT: '[%%(asctime)s] {%%(filename)s:%%(lineno)d} %%(levelname)s - %%(message)s'
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+  user: "${AIRFLOW_UID:-50000}:0"
+  networks:
+    - aula_net
+  depends_on:
+    &airflow-common-depends-on
+    postgres_airflow:
+      condition: service_healthy
+
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Banco de metadados do Airflow (separado do Postgres da aula 1, que é só
+  # o destino das métricas simuladas — não misture os dois)
+  # ───────────────────────────────────────────────────────────────────────────
+  postgres_airflow:
+    image: postgres:16
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    networks:
+      - aula_net
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create --role Admin --username admin --password admin --firstname Admin --lastname Aula --email admin@aula.com || true
+      "
+    user: "0:0"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      postgres_airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      postgres_airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Loki: armazena e indexa os logs (por label, não por conteúdo — por isso
+  # é barato). Config em modo single-binary/filesystem, ok pra aula.
+  # ───────────────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.7.3
+    container_name: obs-loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/loki-config.yaml
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - aula_net
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Alloy: NÃO roda dentro do container do Airflow. É um serviço à parte que
+  # monta (read-only) o mesmo volume de logs do Airflow, faz tail dos arquivos
+  # e envia pro Loki já parseado (dag_id, task_id, level como labels).
+  # ───────────────────────────────────────────────────────────────────────────
+  alloy:
+    image: grafana/alloy:v1.17.1
+    container_name: obs-alloy
+    restart: unless-stopped
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    ports:
+      - "12345:12345"   # UI de debug do Alloy — component graph, targets, etc.
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./logs:/var/log/airflow:ro
+      - alloy_data:/var/lib/alloy/data
+    networks:
+      - aula_net
+    depends_on:
+      - loki
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Grafana: novo, só pra esta aula. Não reaproveita o container/volume da
+  # aula 1 — se quiser comparar lado a lado, o compose antigo pode continuar
+  # rodando em outra pasta com outra porta, mas não é necessário pra este
+  # exercício.
+  # ───────────────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: obs-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - aula_net
+    depends_on:
+      - loki
+
+volumes:
+  postgres_airflow_data:
+  loki_data:
+  alloy_data:
+  grafana_data:
+
+networks:
+  aula_net:
+    name: aula_airflow_observability_net
