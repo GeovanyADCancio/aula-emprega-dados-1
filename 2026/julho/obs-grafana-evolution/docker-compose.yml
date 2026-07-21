@@ -18,13 +18,10 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    # Formato de log padrão do Airflow — é essa string que o Alloy vai parsear.
-    # Mantendo explícito aqui pra não depender do default da imagem mudar.
-    AIRFLOW__LOGGING__LOG_FORMAT: '[%%(asctime)s] {%%(filename)s:%%(lineno)d} %%(levelname)s - %%(message)s'
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
-  user: "${AIRFLOW_UID:-50000}:0"
+  user: "0:0"
   networks:
     - aula_net
   depends_on:
@@ -101,7 +98,7 @@ services:
       - "3100:3100"
     command: -config.file=/etc/loki/loki-config.yaml
     volumes:
-      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - ./loki:/etc/loki:ro
       - loki_data:/loki
     networks:
       - aula_net
@@ -123,7 +120,7 @@ services:
     ports:
       - "12345:12345"   # UI de debug do Alloy — component graph, targets, etc.
     volumes:
-      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./alloy:/etc/alloy:ro
       - ./logs:/var/log/airflow:ro
       - alloy_data:/var/lib/alloy/data
     networks:
