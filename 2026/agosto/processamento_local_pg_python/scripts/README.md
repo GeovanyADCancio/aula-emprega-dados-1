@@ -62,3 +62,6 @@ Navegue até a pasta do script no terminal:
 Para desfazer o último commit (ou mais de um, ajustando o número):
 
     git reset --hard HEAD~1
+
+
+Dados: https://synthea.mitre.org/

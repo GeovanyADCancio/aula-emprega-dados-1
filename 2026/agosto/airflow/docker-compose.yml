@@ -1,0 +1,124 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────────────────────
+# Airflow (LocalExecutor) + 2 postgres:
+#   - postgres_airflow -> metadados do Airflow (DAGs, runs, users)
+#   - postgres_data     -> banco "de negócio", destino do bronze/silver/gold
+# ─────────────────────────────────────────────────────────────────────────
+
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres_airflow/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    # Credenciais do banco "de negócio" (postgres_data), lidas por get_engine()
+    PG_USER: data_user
+    PG_PASS: data_pass
+    PG_HOST: postgres_data
+    PG_PORT: 5432
+    PG_DB: data_db
+    DATA_DIR: /opt/airflow/data
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./data:/opt/airflow/data   # CSVs de origem: patients.csv, encounters.csv, conditions.csv
+  user: "0:0"
+  networks:
+    - aula_net
+  depends_on:
+    &airflow-common-depends-on
+    postgres_airflow:
+      condition: service_healthy
+    postgres_data:
+      condition: service_healthy
+
+services:
+
+  # Banco de metadados do Airflow — não usar para dados.
+  postgres_airflow:
+    image: postgres:16
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    networks:
+      - aula_net
+
+  # Banco "de negócio": onde bronze/silver/gold são gravados pela DAG.
+  postgres_data:
+    image: postgres:16
+    container_name: data-postgres
+    environment:
+      POSTGRES_USER: data_user
+      POSTGRES_PASSWORD: data_pass
+      POSTGRES_DB: data_db
+    ports:
+      - "5433:5432"   # exposto para inspecionar as tabelas com um client externo (host:5433)
+    volumes:
+      - postgres_data_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "data_user"]
+      interval: 5s
+      retries: 5
+    networks:
+      - aula_net
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create --role Admin --username admin --password admin --firstname Admin --lastname Aula --email admin@aula.com || true
+      "
+    user: "0:0"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      postgres_airflow:
+        condition: service_healthy
+      postgres_data:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      postgres_airflow:
+        condition: service_healthy
+      postgres_data:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_airflow_data:
+  postgres_data_data:
+
+networks:
+  aula_net:
+    name: aula_airflow_net
