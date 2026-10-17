@@ -1,0 +1,43 @@
+# Loki em modo mais simples: uma instância só, tudo em disco local.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100   # porta usada pelo Alloy (envio) e pelo Grafana (consulta)
+  grpc_listen_port: 9096
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks   # onde ficam os TEXTOS dos logs
+      rules_directory: /loki/rules
+  replication_factor: 1    # 1 cópia; em produção seria 3
+  ring:
+    kvstore:
+      store: inmemory
+
+# ▶ O QUE EXPLICAR: o Loki guarda duas coisas separadas.
+#   índice (labels, pequeno)  +  chunks (texto dos logs, compactado)
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb               # formato do ÍNDICE (só labels)
+      object_store: filesystem  # onde ficam os CHUNKS (disco; em produção, S3)
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h             # um arquivo de índice por dia, como partição por data
+
+limits_config:
+  # Aula gera bastante log em pouco tempo — folga nos limites padrão
+  # pra não tomar rate limit do Loki no meio da demo.
+  ingestion_rate_mb: 16         # padrão é 4 MB/s
+  ingestion_burst_size_mb: 32   # padrão é 6 MB
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h   # ⚠ recusa logs com mais de 7 dias
+  allow_structured_metadata: true
+  volume_enabled: true          # permite ao Grafana mostrar o volume de logs
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: false      # ⚠ nunca apaga logs antigos: o disco só cresce

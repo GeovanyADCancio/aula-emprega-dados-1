@@ -1,0 +1,91 @@
+logging {
+  level = "info"
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 1) Logs de TASK (o que interessa pra demo: um arquivo por tentativa de
+//    execução, caminho no formato:
+//    dag_id=<dag>/run_id=<run>/task_id=<task>/attempt=<n>.log
+// ─────────────────────────────────────────────────────────────────────────
+local.file_match "airflow_task_logs" {
+  path_targets = [
+    {"__path__" = "/var/log/airflow/dag_id=*/run_id=*/task_id=*/attempt=*.log", "job" = "airflow_task"},
+  ]
+}
+
+loki.source.file "airflow_task_logs" {
+  targets    = local.file_match.airflow_task_logs.targets
+  forward_to = [loki.process.airflow_task.receiver]
+}
+
+loki.process "airflow_task" {
+  forward_to = [loki.write.loki.receiver]
+
+  // dag_id/task_id vêm do CAMINHO do arquivo (label "filename" que o
+  // loki.source.file já anexa automaticamente).
+  // OBS: de propósito NÃO promovemos run_id/attempt como label — cardinalidade
+  // alta (um valor novo por execução) deixa o Loki lento. Se precisar filtrar
+  // por run_id, use `| pattern` na query, não vira label indexado.
+  stage.regex {
+    source     = "filename"
+    expression = ".*dag_id=(?P<dag_id>[^/]+)/run_id=[^/]+/task_id=(?P<task_id>[^/]+)/attempt=(?P<attempt>[0-9]+)\\.log"
+  }
+
+  // Stack trace / mensagens multilinha (ex: exception) começam sem o
+  // timestamp entre colchetes — agrupa tudo até a próxima linha "[YYYY-..."
+  stage.multiline {
+    firstline     = "^\\[\\d{4}-\\d{2}-\\d{2}"
+    max_wait_time = "3s"
+  }
+
+  // Formato padrão do Airflow: [2026-07-18T10:23:45.123-0300] {taskinstance.py:1157} INFO - mensagem
+  stage.regex {
+    expression = "^\\[(?P<timestamp>[0-9T:.\\-]+)\\]\\s+\\{(?P<source_file>[^}]+)\\}\\s+(?P<level>[A-Z]+)\\s+-\\s+(?P<message>(?s).*)"
+  }
+
+  // O offset do Airflow já vem sem separador (-0300), então o layout Go
+  // "-0700" funciona direto — sem a dor de cabeça do formato com ":" que
+  // deu trabalho no pipeline do Qlik.
+  stage.timestamp {
+    source = "timestamp"
+    format = "2006-01-02T15:04:05.000-0700"
+  }
+
+  stage.labels {
+    values = {
+      dag_id = "",
+      task_id = "",
+      level   = "",
+    }
+  }
+
+  // Mantém só a mensagem limpa como texto da linha (timestamp e level já
+  // viraram timestamp real + label, não precisa duplicar no corpo)
+  stage.output {
+    source = "message"
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 2) Logs do scheduler (bônus: mostra que dá pra ter múltiplas fontes no
+//    mesmo Alloy, sem o parsing fino de dag_id/task_id)
+// ─────────────────────────────────────────────────────────────────────────
+local.file_match "airflow_scheduler_logs" {
+  path_targets = [
+    {"__path__" = "/var/log/airflow/scheduler/**/*.log", "job" = "airflow_scheduler"},
+  ]
+}
+
+loki.source.file "airflow_scheduler_logs" {
+  targets    = local.file_match.airflow_scheduler_logs.targets
+  forward_to = [loki.write.loki.receiver]
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 3) Saída: Loki no mesmo docker network (observability_net)
+// ─────────────────────────────────────────────────────────────────────────
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

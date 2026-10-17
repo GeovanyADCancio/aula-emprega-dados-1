@@ -1,0 +1,23 @@
+{
+  "name": "loja-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "plugin.name": "pgoutput",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres1",
+    "database.password": "postgres1",
+    "database.dbname": "mydb",
+    "topic.prefix": "loja",
+    "table.include.list": "public.pedidos",
+    "slot.name": "loja_slot",
+    "publication.name": "loja_pub",
+    "publication.autocreate.mode": "filtered",
+    "decimal.handling.mode": "double",
+    "tombstones.on.delete": "false",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false"
+  }
+}
