@@ -1,0 +1,43 @@
+services:
+
+  # Armazena os LOGS (indexa só os labels, o texto fica comprimido)
+  loki:
+    image: grafana/loki:3.7.3
+    command: -config.file=/etc/loki/loki-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+
+  # Armazena as MÉTRICAS e os CUSTOS dos jobs Spark (tabelas SQL)
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: metricas
+      POSTGRES_PASSWORD: metricas
+      POSTGRES_DB: metricas
+    ports:
+      - "5433:5432"   # 5433 no host para não colidir com outro Postgres seu
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Visualização: lê do Loki (logs) e do Postgres (métricas e custos)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - loki
+      - postgres
+
+volumes:
+  loki_data:
+  postgres_data:
+  grafana_data:
