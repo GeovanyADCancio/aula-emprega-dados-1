@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: aula_star_schema
+    environment:
+      POSTGRES_USER: aula
+      POSTGRES_PASSWORD: aula
+      POSTGRES_DB: dw_vendas
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data:/data:ro   # CSVs gerados pelo script Python
+      - ./sql:/sql:ro     # scripts SQL da aula
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aula -d dw_vendas"]
+      interval: 3s
+      retries: 10
+
+volumes:
+  pgdata:
